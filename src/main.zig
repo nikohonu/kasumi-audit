@@ -11,6 +11,7 @@ const Entry = struct {
 
     pub fn init(allocator: std.mem.Allocator, path: []const u8, kind: std.fs.File.Kind, parent: ?*Entry) !*Entry {
         var self = try allocator.create(Entry);
+
         self.* = Entry{
             .path = path,
             .kind = kind,
@@ -45,12 +46,12 @@ const Entry = struct {
         return self.count > other.count;
     }
 
-    pub fn deinit(self: Entry, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *Entry, allocator: std.mem.Allocator) void {
         for (self.children.items) |item| {
             item.deinit(allocator);
         }
         self.children.deinit();
-        // allocator.destroy(self);
+        allocator.destroy(self);
     }
 
     pub fn format(
@@ -59,7 +60,7 @@ const Entry = struct {
         _: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
-        _ = try writer.print("{{ path: {s}, kind: {}, count: {}, parent: {any} }}", .{ self.path, self.kind, self.count, self.parent });
+        _ = try writer.print("{{ path: {s}, kind: {}, count: {}}}", .{ self.path, self.kind, self.count });
     }
 };
 
@@ -83,24 +84,27 @@ pub fn main() !void {
     while (true) {
         if (child.count > 1) {
             child = child.children.items[0];
-            try stdout.writer().print("{s}\n", .{child.path});
+            try stdout.writer().print("{s}\n", .{child});
         } else {
             break;
         }
     }
-    try stdout.writer().writeAll("What to do. Move up (u), Add (a): ");
-    // var buffer: [100]u8 = undefined;
-    const input = try stdin.reader().readByte();
-    switch (input) {
-        'a' => {
-            try stdout.writer().print("Add {s} to ignore list\n", .{child.path});
-        },
-        'u' => {
-            // try stdout.writer().print("Move up {s}\n", .{child.path});
-            child = child.parent.?;
-            try stdout.writer().print("Move up {s}\n", .{child.path});
-        },
-        else => {},
+    while (true) {
+        try stdout.writer().writeAll("What to do. Move up (u), Add (a): ");
+        // var buffer: [100]u8 = undefined;
+        const input = try stdin.reader().readByte();
+        switch (input) {
+            'a' => {
+                try stdout.writer().print("Add {s} to ignore list\n", .{child.path});
+                break;
+            },
+            'u' => {
+                // try stdout.writer().print("Move up {s}\n", .{child.path});
+                child = child.parent orelse continue;
+                try stdout.writer().print("Move up {s}\n", .{child});
+            },
+            else => {},
+        }
     }
     // try stdout.writer().writeByte(a);
     // for (structure.children.items) |item| {
