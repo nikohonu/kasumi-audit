@@ -1,36 +1,33 @@
 const std = @import("std");
 
+const KnownList = @import("known_list.zig");
+
+pub const Kind = std.fs.File.Kind;
+
 const Entry = @This();
 
 path: []const u8,
-kind: std.fs.File.Kind,
-count: i32,
-children: std.ArrayList(*Entry),
+kind: Kind,
 parent: ?*Entry,
+children: std.ArrayList(*Entry),
+count: i32,
 allocator: std.mem.Allocator,
+// Keep track of all path that was allocated, by Entry
+paths: std.ArrayList([]const u8),
 
-fn is_string_in_array(array: std.ArrayList([]u8), string: []const u8) bool {
-    for (array.items) |item| {
-        if (std.mem.eql(u8, item, string)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-pub fn init(allocator: std.mem.Allocator, path: []const u8, kind: std.fs.File.Kind, parent: ?*Entry, ignore_list: std.ArrayList([]u8)) !*Entry {
-    var self = try allocator.create(Entry);
-
+pub fn init(allocator: std.mem.Allocator, known_list: *KnownList, path: []const u8, kind: Kind, parent: ?*Entry) !*Entry {
+    const self = try allocator.create(Entry);
     self.* = Entry{
+        .allocator = allocator,
         .path = path,
         .kind = kind,
-        .count = 1,
-        .children = std.ArrayList(*Entry).init(allocator),
         .parent = parent,
-        .allocator = allocator,
+        .children = std.ArrayList(*Entry).init(allocator),
+        .count = 1,
+        .paths = std.ArrayList([]const u8).init(allocator),
     };
 
-    if (self.kind != std.fs.File.Kind.directory) {
+    if (self.kind != Kind.directory) {
         return self;
     }
 
@@ -39,41 +36,49 @@ pub fn init(allocator: std.mem.Allocator, path: []const u8, kind: std.fs.File.Ki
 
     var iter = dir.iterate();
     while (try iter.next()) |item| {
-        // _ = ignore_list;
-        const child_path = try std.fs.path.join(allocator, &[_][]const u8{ self.path, item.name });
-        if (is_string_in_array(ignore_list, child_path)) {
-            // std.debug.print("Skip {s}\n", .{child_path});
-            allocator.free(child_path);
+        const item_path = try std.fs.path.join(allocator, &[_][]const u8{ self.path, item.name });
+        if (known_list.is_path_know(item_path)) {
+            allocator.free(item_path);
             continue;
+        } else {
+            try self.paths.append(item_path);
+            const child = try Entry.init(allocator, known_list, item_path, item.kind, self);
+            try self.children.append(child);
+            self.count += child.count;
         }
-        const child = try Entry.init(allocator, child_path, item.kind, self, ignore_list);
-        try self.children.append(child);
-        self.count += child.count;
     }
 
-    std.mem.sort(*Entry, self.children.items, {}, cmp);
+    std.mem.sort(*Entry, self.children.items, {}, less_than);
 
     return self;
 }
 
-fn cmp(_: void, self: *Entry, other: *Entry) bool {
-    return self.count > other.count;
-}
-
 pub fn deinit(self: *Entry) void {
-    for (self.children.items) |item| {
-        item.deinit();
+    // Free all paths
+    for (self.paths.items) |path| {
+        self.allocator.free(path);
+    }
+    self.paths.deinit();
+
+    // Free all children
+    for (self.children.items) |child| {
+        child.deinit();
     }
     self.children.deinit();
-    self.allocator.free(self.path);
+
+    // Free youself
     self.allocator.destroy(self);
 }
 
-pub fn format(
-    self: Entry,
-    comptime _: []const u8,
-    _: std.fmt.FormatOptions,
-    writer: anytype,
-) !void {
-    _ = try writer.print("{{ path: {s}, kind: {}, count: {}}}", .{ self.path, self.kind, self.count });
+fn less_than(_: void, self: *Entry, other: *Entry) bool {
+    return self.count > other.count;
 }
+
+// pub fn format(
+//     self: Entry,
+//     comptime _: []const u8,
+//     _: std.fmt.FormatOptions,
+//     writer: anytype,
+// ) !void {
+//     _ = try writer.print("{{ path: {s}, kind: {}, count: {}}}", .{ self.path, self.kind, self.count });
+// }
