@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const KnownList = @import("known_list.zig");
+const Memory = @import("memory.zig");
 
 pub const Kind = std.fs.File.Kind;
 
@@ -12,7 +13,7 @@ parent: ?*Entry,
 children: std.ArrayList(*Entry),
 count: i32,
 allocator: std.mem.Allocator,
-// Keep track of all path that was allocated, by Entry
+// Keep track of all paths that was allocated, by Entry
 paths: std.ArrayList([]const u8),
 
 pub fn init(allocator: std.mem.Allocator, known_list: *KnownList, path: []const u8, kind: Kind, parent: ?*Entry) !*Entry {
@@ -37,7 +38,7 @@ pub fn init(allocator: std.mem.Allocator, known_list: *KnownList, path: []const 
     var iter = dir.iterate();
     while (try iter.next()) |item| {
         const item_path = try std.fs.path.join(allocator, &[_][]const u8{ self.path, item.name });
-        if (known_list.is_path_know(item_path)) {
+        if (known_list.skip_needed(item_path)) {
             allocator.free(item_path);
             continue;
         } else {
@@ -55,16 +56,9 @@ pub fn init(allocator: std.mem.Allocator, known_list: *KnownList, path: []const 
 
 pub fn deinit(self: *Entry) void {
     // Free all paths
-    for (self.paths.items) |path| {
-        self.allocator.free(path);
-    }
-    self.paths.deinit();
-
+    Memory.free_array_list_of_strings(self.allocator, &self.paths);
     // Free all children
-    for (self.children.items) |child| {
-        child.deinit();
-    }
-    self.children.deinit();
+    Memory.free_array_list_of_item(*Entry, &self.children);
 
     // Free youself
     self.allocator.destroy(self);
@@ -74,11 +68,7 @@ fn less_than(_: void, self: *Entry, other: *Entry) bool {
     return self.count > other.count;
 }
 
-// pub fn format(
-//     self: Entry,
-//     comptime _: []const u8,
-//     _: std.fmt.FormatOptions,
-//     writer: anytype,
-// ) !void {
-//     _ = try writer.print("{{ path: {s}, kind: {}, count: {}}}", .{ self.path, self.kind, self.count });
-// }
+pub fn get_parent_name(self: Entry) ?[]const u8 {
+    const dirname = std.fs.path.dirname(self.path) orelse return null;
+    return std.fs.path.basename(dirname);
+}
